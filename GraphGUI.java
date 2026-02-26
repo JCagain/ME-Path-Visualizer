@@ -78,66 +78,90 @@ public class GraphGUI extends JFrame {
     // Adjacent floors are connected at two bridging nodes (distance 2).
     // Floor 0 has three Exit nodes.
     private void buildSampleGraph() {
-        Random rng = new Random(42); // fixed seed for reproducibility
+        //  4 floors, each a 2-col x 3-row rectangle, staggered vertically.
+        //
+        //  Node naming: floor digit + letter, left col top-to-bottom then right col:
+        //    Floor 0: 0A, 0B, 0C (left), 0D, 0E, 0F (right)
+        //    Floor 1: 1A, 1B, 1C (left), 1D, 1E, 1F (right)
+        //    ...
+        //
+        //  Ring per floor (clockwise):
+        //    0A - 0D  (top edge)
+        //    0D - 0E  (right col down)
+        //    0E - 0F  (right col down)
+        //    0F - 0C  (bottom edge)
+        //    0C - 0B  (left col up)
+        //    0B - 0A  (left col up)
+        //
+        //  Inter-floor bridges at top row and bottom row.
+        //  Exits on floor 0, bottom row (0C = West Exit, 0F = East Exit).
+        //
+        //  Canvas layout: floors side by side horizontally,
+        //  each shifted downward by `stagger` pixels relative to the previous.
 
-        // ── Node creation ─────────────────────────────────────
-        // Floor layout: 4 hexagonal rings drawn left-to-right.
-        // Canvas area ≈ 1100 × 650 (after toolbar/statusbar).
-        // Ring centres: x = 160, 420, 680, 940  y = 330
-        // Each ring has 6 nodes at angles 0°, 60°, 120°, 180°, 240°, 300°
-        // with radius 110px.
+        final int FLOORS  = 4;
+        final int colGap  = 160;  // horizontal distance between left and right column
+        final int rowGap  = 110;  // vertical distance between rows within a floor
+        final int floorW  = 230;  // horizontal distance between floor blocks
+        final int stagger =  40;  // each floor is shifted down by this amount
+        final int originX =  80;  // x of left column of floor 0
+        final int originY =  80;  // y of top row of floor 0
 
-        int[]    cx     = {160, 420, 680, 940};
-        int      cy     = 330;
-        int      radius = 110;
-        int      FLOORS = 4;
-        int      PER_FL = 6;
+        // n[floor][col][row]: col 0=left, 1=right; row 0=top, 1=mid, 2=bottom
+        Node[][][] n = new Node[FLOORS][2][3];
 
-        // nodes[floor][index]
-        Node[][] nodes = new Node[FLOORS][PER_FL];
-
-        // Exit labels for floor 0, indices 0, 2, 4
-        String[] exitNames  = {"North Gate", "East Gate", "South Gate"};
-        int[]    exitIdx    = {0, 2, 4};
+        // Letter sequence for naming: left col = A,B,C  right col = D,E,F
+        char[] leftLetters  = {'A', 'B', 'C'};
+        char[] rightLetters = {'D', 'E', 'F'};
 
         for (int fl = 0; fl < FLOORS; fl++) {
-            int ei = 0; // exit name pointer
-            for (int i = 0; i < PER_FL; i++) {
-                double angle = Math.toRadians(i * 60 - 90); // start at top
-                int px = cx[fl] + (int)(radius * Math.cos(angle));
-                int py = cy     + (int)(radius * Math.sin(angle));
+            int lx = originX + fl * floorW;
+            int rx = lx + colGap;
+            int yBase = originY + fl * stagger;  // stagger each floor downward
 
-                String id   = fl + "" + (char)('A' + i);   // e.g. "0A", "1C"
-                float  temp = 18f + rng.nextFloat() * 12f; // 18–30 °C
-                float  gas  =        rng.nextFloat() * 0.1f; // 0–0.1
+            for (int row = 0; row < 3; row++) {
+                int    y   = yBase + row * rowGap;
+                float  t   = 20f + row * 4f;
+                float  g   = 0.01f + row * 0.01f;
+                String lid = fl + "" + leftLetters[row];
+                String rid = fl + "" + rightLetters[row];
 
-                boolean isExit = (fl == 0) && (i == exitIdx[0] || i == exitIdx[1] || i == exitIdx[2]);
-                if (isExit) {
-                    nodes[fl][i] = new Exit(id, exitNames[ei++], fl, true, temp, gas);
+                if (fl == 0 && row == 2) {
+                    // Ground floor bottom row → exits
+                    n[fl][0][row] = new Exit(lid, "West Exit", fl, true,  t, g);
+                    n[fl][1][row] = new Exit(rid, "East Exit", fl, false, 78f, 0.85f); // blocked
                 } else {
-                    nodes[fl][i] = new Node(id, fl, temp, gas);
+                    // Make one node impassable to demonstrate the feature
+                    boolean hot = (fl == 2 && row == 1);
+                    n[fl][0][row] = new Node(lid, fl, hot ? 82f : t, hot ? 0.75f : g);
+                    n[fl][1][row] = new Node(rid, fl, t, g);
                 }
-                positions.put(nodes[fl][i], new Point(px, py));
-                nodeList.add(nodes[fl][i]);
+
+                nodeList.add(n[fl][0][row]);
+                nodeList.add(n[fl][1][row]);
+                positions.put(n[fl][0][row], new Point(lx, y));
+                positions.put(n[fl][1][row], new Point(rx, y));
             }
         }
 
-        // ── Ring edges (random weight 1 or 2) ─────────────────
+        // ── Per-floor ring edges (clockwise) ──────────────────────
         for (int fl = 0; fl < FLOORS; fl++) {
-            for (int i = 0; i < PER_FL; i++) {
-                float w = 1f + rng.nextInt(2); // 1 or 2
-                nodes[fl][i].addBidirectionalNeighbor(nodes[fl][(i + 1) % PER_FL], w);
-            }
+            n[fl][0][0].addBidirectionalNeighbor(n[fl][1][0], 3f); // top edge
+            n[fl][1][0].addBidirectionalNeighbor(n[fl][1][1], 2f); // right col top -> mid
+            n[fl][1][1].addBidirectionalNeighbor(n[fl][1][2], 2f); // right col mid -> bot
+            n[fl][1][2].addBidirectionalNeighbor(n[fl][0][2], 3f); // bottom edge
+            n[fl][0][2].addBidirectionalNeighbor(n[fl][0][1], 2f); // left col bot -> mid
+            n[fl][0][1].addBidirectionalNeighbor(n[fl][0][0], 2f); // left col mid -> top
         }
 
-        // ── Inter-floor bridges (distance 2) ──────────────────
-        // Connect floor F to floor F+1 at node indices 1 and 4
-        // (top-right and bottom-left of the hexagon — visually intuitive).
-        int[] bridgeIdx = {1, 4};
+        // ── Inter-floor bridges ───────────────────────────────────
+        // Connect adjacent floors at top row (row 0) and bottom row (row 2),
+        // both left and right columns.
         for (int fl = 0; fl < FLOORS - 1; fl++) {
-            for (int bi : bridgeIdx) {
-                nodes[fl][bi].addBidirectionalNeighbor(nodes[fl + 1][bi], 2f);
-            }
+            n[fl][0][0].addBidirectionalNeighbor(n[fl+1][0][0], 4f); // left  top
+            n[fl][1][0].addBidirectionalNeighbor(n[fl+1][1][0], 4f); // right top
+            n[fl][0][2].addBidirectionalNeighbor(n[fl+1][0][2], 4f); // left  bottom
+            n[fl][1][2].addBidirectionalNeighbor(n[fl+1][1][2], 4f); // right bottom
         }
     }
 
