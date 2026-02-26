@@ -1,7 +1,8 @@
-# Graph Visualizer
+# Path Visualizer
 
 A Java Swing application for visualising and interacting with a weighted,
-multi-floor Node/Exit graph. Supports real-time passability toggling and
+multi-floor Node/Exit graph that stimulats the map of a building.
+Supports real-time passability toggling and
 shortest-path finding across floors.
 
 ---
