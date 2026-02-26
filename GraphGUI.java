@@ -68,42 +68,77 @@ public class GraphGUI extends JFrame {
         buildSampleGraph();
         buildUI();
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setSize(1100, 720);
+        setSize(1360, 780);
         setLocationRelativeTo(null);
         setVisible(true);
     }
 
     // ── Sample graph ──────────────────────────────────────────
+    // Four floors (0-3), each a 6-node ring with random edge weights 1-2.
+    // Adjacent floors are connected at two bridging nodes (distance 2).
+    // Floor 0 has three Exit nodes.
     private void buildSampleGraph() {
-        Node a  = new Node("A",  1, 25f, 0.01f);
-        Node b  = new Node("B",  1, 30f, 0.05f);
-        Node c  = new Node("C",  1, 80f, 0.95f);  // impassable by threshold
-        Node d  = new Node("D",  1, 27f, 0.02f);
-        Node f  = new Node("F",  1, 22f, 0.03f);
-        Exit e1 = new Exit("E1", "North Gate", 1, true,  22f, 0.01f);
-        Exit e2 = new Exit("E2", "South Gate", 1, false, 75f, 0.80f); // blocked
-        Exit e3 = new Exit("E3", "East Gate",  1, true,  20f, 0.01f);
+        Random rng = new Random(42); // fixed seed for reproducibility
 
-        a.addBidirectionalNeighbor(b,  5f);
-        a.addBidirectionalNeighbor(c,  3f);
-        a.addBidirectionalNeighbor(f,  8f);
-        b.addBidirectionalNeighbor(d,  4f);
-        b.addBidirectionalNeighbor(e1, 6f);
-        c.addBidirectionalNeighbor(d,  2f);
-        d.addBidirectionalNeighbor(e2, 7f);
-        d.addBidirectionalNeighbor(f,  3f);
-        f.addBidirectionalNeighbor(e3, 5f);
+        // ── Node creation ─────────────────────────────────────
+        // Floor layout: 4 hexagonal rings drawn left-to-right.
+        // Canvas area ≈ 1100 × 650 (after toolbar/statusbar).
+        // Ring centres: x = 160, 420, 680, 940  y = 330
+        // Each ring has 6 nodes at angles 0°, 60°, 120°, 180°, 240°, 300°
+        // with radius 110px.
 
-        nodeList.addAll(Arrays.asList(a, b, c, d, f, e1, e2, e3));
+        int[]    cx     = {160, 420, 680, 940};
+        int      cy     = 330;
+        int      radius = 110;
+        int      FLOORS = 4;
+        int      PER_FL = 6;
 
-        positions.put(a,  new Point(200, 300));
-        positions.put(b,  new Point(370, 180));
-        positions.put(c,  new Point(370, 420));
-        positions.put(d,  new Point(540, 300));
-        positions.put(f,  new Point(310, 490));
-        positions.put(e1, new Point(560, 130));
-        positions.put(e2, new Point(720, 300));
-        positions.put(e3, new Point(500, 510));
+        // nodes[floor][index]
+        Node[][] nodes = new Node[FLOORS][PER_FL];
+
+        // Exit labels for floor 0, indices 0, 2, 4
+        String[] exitNames  = {"North Gate", "East Gate", "South Gate"};
+        int[]    exitIdx    = {0, 2, 4};
+
+        for (int fl = 0; fl < FLOORS; fl++) {
+            int ei = 0; // exit name pointer
+            for (int i = 0; i < PER_FL; i++) {
+                double angle = Math.toRadians(i * 60 - 90); // start at top
+                int px = cx[fl] + (int)(radius * Math.cos(angle));
+                int py = cy     + (int)(radius * Math.sin(angle));
+
+                String id   = fl + "" + (char)('A' + i);   // e.g. "0A", "1C"
+                float  temp = 18f + rng.nextFloat() * 12f; // 18–30 °C
+                float  gas  =        rng.nextFloat() * 0.1f; // 0–0.1
+
+                boolean isExit = (fl == 0) && (i == exitIdx[0] || i == exitIdx[1] || i == exitIdx[2]);
+                if (isExit) {
+                    nodes[fl][i] = new Exit(id, exitNames[ei++], fl, true, temp, gas);
+                } else {
+                    nodes[fl][i] = new Node(id, fl, temp, gas);
+                }
+                positions.put(nodes[fl][i], new Point(px, py));
+                nodeList.add(nodes[fl][i]);
+            }
+        }
+
+        // ── Ring edges (random weight 1 or 2) ─────────────────
+        for (int fl = 0; fl < FLOORS; fl++) {
+            for (int i = 0; i < PER_FL; i++) {
+                float w = 1f + rng.nextInt(2); // 1 or 2
+                nodes[fl][i].addBidirectionalNeighbor(nodes[fl][(i + 1) % PER_FL], w);
+            }
+        }
+
+        // ── Inter-floor bridges (distance 2) ──────────────────
+        // Connect floor F to floor F+1 at node indices 1 and 4
+        // (top-right and bottom-left of the hexagon — visually intuitive).
+        int[] bridgeIdx = {1, 4};
+        for (int fl = 0; fl < FLOORS - 1; fl++) {
+            for (int bi : bridgeIdx) {
+                nodes[fl][bi].addBidirectionalNeighbor(nodes[fl + 1][bi], 2f);
+            }
+        }
     }
 
     // ── UI layout ─────────────────────────────────────────────
@@ -124,7 +159,7 @@ public class GraphGUI extends JFrame {
         bar.setBackground(PANEL_BG);
         bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_COL));
 
-        JLabel title = new JLabel("GRAPH VISUALIZER");
+        JLabel title = new JLabel("PATH VISUALIZER");
         title.setFont(new Font("Courier New", Font.BOLD, 15));
         title.setForeground(ACCENT);
         bar.add(title);
@@ -157,6 +192,7 @@ public class GraphGUI extends JFrame {
         bar.add(legendDot(NODE_BLUE,  "Node"));
         bar.add(legendDot(NODE_GREEN, "Exit"));
         bar.add(legendDot(NODE_RED,   "Impassable"));
+        bar.add(legendDash("Inter-floor bridge"));
         return bar;
     }
 
@@ -185,8 +221,21 @@ public class GraphGUI extends JFrame {
         dot.setForeground(c);
         JLabel lbl = new JLabel(label);
         lbl.setFont(new Font("Courier New", Font.PLAIN, 11));
-        lbl.setForeground(TEXT_DIM);
+        lbl.setForeground(TEXT_BRIGHT);
         p.add(dot); p.add(lbl);
+        return p;
+    }
+
+    private JPanel legendDash(String label) {
+        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        p.setOpaque(false);
+        JLabel dash = new JLabel("- -");
+        dash.setFont(new Font("Courier New", Font.BOLD, 13));
+        dash.setForeground(new Color(180, 130, 255));
+        JLabel lbl = new JLabel(label);
+        lbl.setFont(new Font("Courier New", Font.PLAIN, 11));
+        lbl.setForeground(TEXT_DIM);
+        p.add(dash); p.add(lbl);
         return p;
     }
 
@@ -253,12 +302,12 @@ public class GraphGUI extends JFrame {
 
     // ── Status bar ────────────────────────────────────────────
     private JPanel buildStatusBar() {
-        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 6));
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 18, 6));
         bar.setBackground(PANEL_BG);
         bar.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_COL));
         statusLabel = new JLabel("Click a node to toggle its passability.");
-        statusLabel.setFont(new Font("Courier New", Font.PLAIN, 11));
-        statusLabel.setForeground(TEXT_DIM);
+        statusLabel.setFont(new Font("Courier New", Font.PLAIN, 15));
+        statusLabel.setForeground(TEXT_BRIGHT);
         bar.add(statusLabel);
         return bar;
     }
@@ -283,14 +332,38 @@ public class GraphGUI extends JFrame {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,     RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,   RenderingHints.VALUE_STROKE_PURE);
+            drawFloorLabels(g2);
             drawEdges(g2);
             drawPathHighlights(g2);
             drawNodes(g2);
         }
 
+        // ── Floor labels ──────────────────────────────────────
+        private void drawFloorLabels(Graphics2D g2) {
+            int[] cx = {160, 420, 680, 940};
+            g2.setFont(new Font("Courier New", Font.BOLD, 12));
+            for (int fl = 0; fl < 4; fl++) {
+                String lbl = "Floor " + fl + (fl == 0 ? "  (exits)" : "");
+                FontMetrics fm = g2.getFontMetrics();
+                int x = cx[fl] - fm.stringWidth(lbl) / 2;
+                // Dim pill background
+                g2.setColor(new Color(40, 45, 65, 200));
+                g2.fillRoundRect(x - 6, 28, fm.stringWidth(lbl) + 12, 20, 8, 8);
+                g2.setColor(fl == 0 ? NODE_GREEN.darker() : TEXT_DIM);
+                g2.drawString(lbl, x, 43);
+            }
+        }
+
         // ── Edges ─────────────────────────────────────────────
         private void drawEdges(Graphics2D g2) {
+            // Draw inter-floor bridge edges first (behind ring edges)
             Set<String> drawn = new HashSet<>();
+            Color BRIDGE_COL = new Color(180, 130, 255, 160); // purple tint for bridges
+            float[] dash = {6f, 4f};
+            Stroke bridgeStroke = new BasicStroke(1.8f, BasicStroke.CAP_ROUND,
+                                                  BasicStroke.JOIN_ROUND, 1f, dash, 0f);
+            Stroke ringStroke   = new BasicStroke(1.8f, BasicStroke.CAP_ROUND,
+                                                  BasicStroke.JOIN_ROUND);
             for (Node n : nodeList) {
                 Point p1 = positions.get(n);
                 for (Map.Entry<Node, Float> e : n.getNeighbors().entrySet()) {
@@ -301,19 +374,20 @@ public class GraphGUI extends JFrame {
                     if (!drawn.add(key)) continue;
                     Point p2 = positions.get(m);
 
-                    g2.setColor(EDGE_COL);
-                    g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    boolean isBridge = n.getFloor() != m.getFloor();
+                    g2.setColor(isBridge ? BRIDGE_COL : EDGE_COL);
+                    g2.setStroke(isBridge ? bridgeStroke : ringStroke);
                     g2.drawLine(p1.x, p1.y, p2.x, p2.y);
 
                     // Weight pill
                     int mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
                     g2.setFont(new Font("Courier New", Font.PLAIN, 10));
-                    String     wt = String.valueOf((int) e.getValue().floatValue());
+                    String      wt = String.valueOf((int) e.getValue().floatValue());
                     FontMetrics fm = g2.getFontMetrics();
                     int tw = fm.stringWidth(wt);
                     g2.setColor(new Color(22, 25, 38, 200));
                     g2.fillRoundRect(mx - tw / 2 - 3, my - 8, tw + 6, 14, 6, 6);
-                    g2.setColor(EDGE_WEIGHT);
+                    g2.setColor(isBridge ? BRIDGE_COL.brighter() : EDGE_WEIGHT);
                     g2.drawString(wt, mx - tw / 2, my + 3);
                 }
             }
